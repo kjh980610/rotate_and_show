@@ -21,7 +21,7 @@ from collections import OrderedDict
 
 
 
-def box_rotate(current_pose,rotate_pose) :
+def target_rotate(current_pose,rotate_pose) :
     rospy.init_node('box_rotate', anonymous=True)
 
     operate_robot = rospy.ServiceProxy('/operate_robot_joint',OperatePytamp)
