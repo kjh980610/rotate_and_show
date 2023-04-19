@@ -1,3 +1,5 @@
 # active-nerf
 
-아직 잘 모름
+run target_rotate_example.py or target_show_example.py
+
+README.md 어떤 식으로 작성해야 하는지 모르겠다아
