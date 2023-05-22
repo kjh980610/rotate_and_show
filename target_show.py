@@ -17,6 +17,7 @@ from pykin.utils.transform_utils import get_rpy_from_matrix
 
 from pytamp.scene.scene_manager import SceneManager
 from pytamp.planners.rrt_star_planner import RRTStarPlanner
+from pytamp.planners.cartesian_planner import CartesianPlanner
 from collections import OrderedDict
 
 
@@ -79,7 +80,24 @@ def target_show(current_pose) :
     )
 
 
-    #타겟 위치를 통해 그랩 pose 설정(z)
+    def update_rrt_path(scene_mngr, goal_pose,joint_path):        #rrt로 path 생성
+        planner = RRTStarPlanner(delta_distance=0.05, epsilon=0.2, gamma_RRT_star=2, dimension = robot.arm_dof)
+        planner.run(scene_mngr=scene_mngr, cur_q=joint_path[-1], goal_pose=goal_pose, max_iter=300)
+        joint_path += planner.get_joint_path(n_step=10)
+
+    def update_cartesian_path(scene_mngr,goal_pose,joint_path):        #cartesian path 생성
+        planner = CartesianPlanner(n_step = 10, dimension = robot.arm_dof)
+        planner.run(scene_mngr=scene_mngr, cur_q=joint_path[-1], goal_pose=goal_pose)
+        joint_path += planner.get_joint_path()
+         
+
+    #path 초기값
+    joint_path =[init_qpos]         #[[qpos(7 joint angles)],...]
+    joint_pathes = OrderedDict()    #OrderedDict([('task',[joint_path]),... ])
+    pathes_num = 0                  #
+
+
+    #타겟 위치를 통해 grasp pose 설정(z)
     init_pose = scene_mngr.get_robot_eef_pose()                     #로봇 초기 eef pose 저장
     target_yaw = get_rpy_from_matrix(current_pose.h_mat)[2]          #타겟 현재 yaw 불러오기
     grasp_pose = current_pose.h_mat                                  
@@ -87,24 +105,23 @@ def target_show(current_pose) :
     grasp_pose[:3, :3] = r_mat                                      #yaw는 타겟과 동일
     grasp_pose[:3, 3] = grasp_pose[:3, 3] + [0, 0, 0.2]             #pos는 z만 약간 더 높게 설정
 
+    cartesian_dis_mat = np.zeros((4,4))
+    cartesian_dis_mat[2,3] = 0.3
 
+    pre_grasp_pose = grasp_pose + cartesian_dis_mat
 
-    def update_joint_path(scene_mngr, goal_pose,joint_path):        #rrt로 path 생성
-        planner = RRTStarPlanner(delta_distance=0.05, epsilon=0.2, gamma_RRT_star=2, dimension = robot.arm_dof)
-        planner.run(scene_mngr=scene_mngr, cur_q=joint_path[-1], goal_pose=goal_pose, max_iter=300)
-        joint_path += planner.get_joint_path(n_step=10)
-
-
-    #path 초기값
-    joint_path =[init_qpos]         #[[qpos(7 joint angles)],...]
-    joint_pathes = OrderedDict()    #OrderedDict([('task',[joint_path]),... ])
-    pathes_num = 0                  #
+    #pre_grasp
+    print("pre grasp")
+    update_rrt_path(scene_mngr, pre_grasp_pose, joint_path)
+    joint_pathes.update({"pre_grasp" : joint_path[pathes_num:-1]})
+    pathes_num = len(joint_path)+1
 
     #grasp
     print("grasp")
-    update_joint_path(scene_mngr, grasp_pose, joint_path)
+    update_cartesian_path(scene_mngr, grasp_pose, joint_path)
     joint_pathes.update({"grasp" : joint_path[pathes_num:-1]})
-    pathes_num = len(joint_path)
+    pathes_num = len(joint_path)+1
+    scene_mngr.set_robot_eef_pose(joint_path[-1])
     scene_mngr.attach_object_on_gripper("target")                   #씬메니져 충돌감지를 위한 attach
     
 
@@ -112,30 +129,47 @@ def target_show(current_pose) :
     default_pose=init_pose + np.zeros((4,4))
     default_pose[:3, :3] = r_mat
 
+
     print("post_grasp")
-    update_joint_path(scene_mngr, default_pose, joint_path)
+    update_cartesian_path(scene_mngr, pre_grasp_pose, joint_path)
     joint_pathes.update({"post_grasp" : joint_path[pathes_num:-1]})
-    pathes_num = len(joint_path)
+    pathes_num = len(joint_path)+1
+
+
+    print("default_grasp_pose")
+    update_rrt_path(scene_mngr, default_pose, joint_path)
+    joint_pathes.update({"default_grasp_pose" : joint_path[pathes_num:-1]})
+    pathes_num = len(joint_path)+1
+
 
     show_pose = Transform(pos=np.array([0.6,0,1.2]),rot=np.array([0,np.pi/2,0]))
     show_pose = show_pose.h_mat
 
     print("show")
-    update_joint_path(scene_mngr, show_pose, joint_path)
+    update_rrt_path(scene_mngr, show_pose, joint_path)
     joint_pathes.update({"show" : joint_path[pathes_num:-1]})
     pathes_num = len(joint_path)
 
     print("post_show")
-    update_joint_path(scene_mngr, default_pose, joint_path)
+    update_rrt_path(scene_mngr, default_pose, joint_path)
     joint_pathes.update({"post_show" : joint_path[pathes_num:-1]})
     pathes_num = len(joint_path)
 
 
     release_pose = grasp_pose
+    pre_release_pose = release_pose + cartesian_dis_mat
+
+    print("pre_release")
+    update_rrt_path(scene_mngr, pre_release_pose, joint_path)
+    joint_pathes.update({"pre_release" : joint_path[pathes_num:-1]})
+    pathes_num = len(joint_path)+1
+
+
     print("release")
-    update_joint_path(scene_mngr, release_pose, joint_path)
+    update_cartesian_path(scene_mngr, release_pose, joint_path)
     joint_pathes.update({"release" : joint_path[pathes_num:-1]})
-    pathes_num = len(joint_path)
+    pathes_num = len(joint_path)+1
+
 
     #씬메니져 충돌감지를 위한 dettach, 씬에서 제거된 물체 다시 추가
     scene_mngr.detach_object_from_gripper("target")
@@ -147,11 +181,17 @@ def target_show(current_pose) :
         color=[1.0, 0.0, 0.0],
     )
 
-    #post_release - 초기 위치로 돌아가기
-    print("post_relase")
-    update_joint_path(scene_mngr, init_pose, joint_path)
-    joint_pathes.update({"post_relase" : joint_path[pathes_num:-1]})
-    pathes_num = len(joint_path)
+    #post_release
+    print("post_release")
+    update_cartesian_path(scene_mngr, pre_release_pose, joint_path)
+    joint_pathes.update({"post_release" : joint_path[pathes_num:-1]})
+    pathes_num = len(joint_path)+1
+
+    #back_init_pose - 초기 위치로 돌아가기
+    print("back_init_pose")
+    update_rrt_path(scene_mngr, init_pose, joint_path)
+    joint_pathes.update({"post_release" : joint_path[pathes_num:-1]})
+    pathes_num = len(joint_path)+1
 
 
     global_move_time = 6
@@ -165,31 +205,11 @@ def target_show(current_pose) :
     import time
 
     for task, value in joint_pathes.items():
-            if task == "grasp":
-                print("grasp")
-                grasp_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(grasp_joint_path,local_move_time)
-                operate_gripper(0.7)
-            elif task == "post_grasp":
-                print("post_grasp")
-                post_grasp_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(post_grasp_joint_path,local_move_time)
-            elif task == "show":
-                print("show")
-                show_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(show_joint_path,local_move_time)
-                time.sleep(10)
-            elif task == "post_show":
-                print("post_show")
-                post_show_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(post_show_joint_path,local_move_time)
-            elif task == "release":
-                print("relase")
-                release_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(release_joint_path,local_move_time)
-                operate_gripper(0)
-            elif task == "post_relase":
-                print("post_relase")
-                post_release_joint_path = np.array(value).reshape(-1).tolist()
-                operate_robot(post_release_joint_path,local_move_time)
+        print(task)
+        joint_path = np.array(value).reshape(-1).tolist()
+        operate_robot(joint_path,local_move_time)
+        if task == "grasp":
+            operate_gripper(0.7)
+        elif task == "release":
+            operate_gripper(0)
     return 0
