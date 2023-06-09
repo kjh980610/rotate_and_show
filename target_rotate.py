@@ -182,7 +182,7 @@ def target_rotate(current_pose,rotate_pose) :
     #back_init_pose - 초기 위치로 돌아가기
     print("back_init_pose")
     update_rrt_path(scene_mngr, init_pose, joint_path)
-    joint_pathes.update({"post_release" : joint_path[pathes_num:-1]})
+    joint_pathes.update({"back_init_pose" : joint_path[pathes_num:-1]})
     pathes_num = len(joint_path)+1
 
 
